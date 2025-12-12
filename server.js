@@ -39,6 +39,22 @@ app.get('/api/health', (req, res) => {
     res.json({ status: "ok", time: new Date() });
 });
 
+function requireAuth(req, res, next) {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader) return res.status(401).json({ error: "No token provided" });
+
+    const token = authHeader.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Invalid token format" });
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded; // attach to request
+        next();
+    } catch (err) {
+        return res.status(403).json({ error: "Invalid or expired token" });
+    }
+}
+
 // GET logs for a site
 app.get('/api/logs/:site', validateApiKey, async (req, res) => {
     const site = req.params.site;
@@ -139,6 +155,45 @@ app.post('/api/logs/:site', validateApiKey, async (req, res) => {
     }
 });
 
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+
+// ---------------------- LOGIN ROUTE ----------------------
+app.post("/api/login", async (req, res) => {
+    const { username, password } = req.body;
+
+    if (!username || !password)
+        return res.status(400).json({ error: "Missing username or password" });
+
+    try {
+        const result = await pool.query(
+            "SELECT * FROM victornavas.users WHERE username = $1",
+            [username]
+        );
+
+        if (result.rows.length === 0)
+            return res.status(401).json({ error: "Invalid credentials" });
+
+        const user = result.rows[0];
+
+        // Compare hashed password
+        const validPass = await bcrypt.compare(password, user.password_hash);
+        if (!validPass)
+            return res.status(401).json({ error: "Invalid credentials" });
+
+        // Generate JWT
+        const token = jwt.sign(
+            { user_id: user.id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES || "7d" }
+        );
+
+        res.json({ success: true, token });
+    } catch (err) {
+        console.error("Login error:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
 
 
 //// -------- START SERVER -------- ////
