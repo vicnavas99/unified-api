@@ -1,203 +1,59 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
-const siteKeys = require('./utils/keys');
+/**
+ * Unified API - server.js
+ * Works in local + production automatically
+ */
 
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const { Pool } = require("pg");
+
+// Route files
+const logsRoutes = require("./routes/logs.routes");
+const authRoutes = require("./routes/auth.routes");
+
+// -------------------- APP SETUP --------------------
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || "development";
+
 app.use(cors());
+app.use(express.json());
 
-// DB Connection
+// -------------------- DATABASE --------------------
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-});
-pool.query("SELECT current_database()", (err, result) => {
-    console.log("API connected to DB:", result?.rows?.[0]);
-});
-
-// Validate API Key middleware
-function validateApiKey(req, res, next) {
-    const site = req.params.site;
-    const key = req.headers['x-api-key'];
-
-    if (!siteKeys[site]) {
-        return res.status(400).json({ error: "Unknown site" });
-    }
-    if (siteKeys[site] !== key) {
-        return res.status(403).json({ error: "Invalid API Key" });
-    }
-
-    next();
-}
-
-//// -------- ROUTES -------- ////
-
-// Health Check
-app.get('/api/health', (req, res) => {
-    res.json({ status: "ok", time: new Date() });
-});
-
-function requireAuth(req, res, next) {
-    const authHeader = req.headers["authorization"];
-    if (!authHeader) return res.status(401).json({ error: "No token provided" });
-
-    const token = authHeader.split(" ")[1];
-    if (!token) return res.status(401).json({ error: "Invalid token format" });
-
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded; // attach to request
-        next();
-    } catch (err) {
-        return res.status(403).json({ error: "Invalid or expired token" });
-    }
-}
-
-// GET logs for a site
-app.get('/api/logs/:site', validateApiKey, async (req, res) => {
-    const site = req.params.site;
-
-    try {
-        const result = await pool.query(
-            "SELECT * FROM appdata.logs WHERE site_id=$1 ORDER BY created_at DESC",
-            [site]
-        );
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Create a log entry for a site
-const fetch = require("node-fetch");
-
-// Helper: detect browser + OS from user-agent
-function parseUserAgent(ua) {
-    ua = ua || "";
-
-    let browser = "Unknown";
-    if (/chrome/i.test(ua)) browser = "Chrome";
-    else if (/safari/i.test(ua)) browser = "Safari";
-    else if (/firefox/i.test(ua)) browser = "Firefox";
-    else if (/edge/i.test(ua)) browser = "Edge";
-    else if (/msie|trident/i.test(ua)) browser = "Internet Explorer";
-
-    let os = "Unknown";
-    if (/windows/i.test(ua)) os = "Windows";
-    else if (/macintosh|mac os/i.test(ua)) os = "MacOS";
-    else if (/android/i.test(ua)) os = "Android";
-    else if (/iphone|ipad|ios/i.test(ua)) os = "iOS";
-    else if (/linux/i.test(ua)) os = "Linux";
-
-    let device_type =
-        /mobile/i.test(ua) ? "Mobile" :
-        /tablet/i.test(ua) ? "Tablet" :
-        "Desktop";
-
-    return { browser, os, device_type };
-}
-
-app.post('/api/logs/:site', validateApiKey, async (req, res) => {
-    const site = req.params.site;
-
-    // 1. Extract IP and fallback values
-    const ip =
-        req.headers["x-real-ip"] ||
-        req.headers["x-forwarded-for"] ||
-        req.ip ||
-        "Unknown";
-
-    const ua = req.headers["user-agent"] || null;
-    const referrer = req.headers["referer"] || null;
-    const url = req.body.url || null;
-    const message = req.body.message || "Visitor logged";
-
-    // 2. Parse UA -> browser, OS, device
-    const { browser, os, device_type } = parseUserAgent(ua);
-
-    // 3. GeoIP lookup (free API)
-    const geoApiUrl = `https://ipapi.co/${ip}/json/`;
-    let country = "Unknown";
-
-    try {
-        const geoResponse = await fetch(geoApiUrl);
-        if (geoResponse.ok) {
-            const geo = await geoResponse.json();
-            if (geo && geo.country_name) {
-                country = geo.country_name;
-            }
-        }
-    } catch (err) {
-        console.error("GeoIP lookup failed:", err.message);
-    }
-
-    // 4. Save into DB
-    try {
-        const result = await pool.query(
-            `INSERT INTO appdata.logs 
-            (site_id, message, ip, country, user_agent, device_type, browser, os, url, referrer) 
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            RETURNING *`,
-            [
-                site, message, ip, country,
-                ua, device_type, browser, os,
-                url, referrer
-            ]
-        );
-
-        res.json(result.rows[0]);
-
-    } catch (err) {
-        console.error("DB ERROR:", err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-
-// ---------------------- LOGIN ROUTE ----------------------
-app.post("/api/login", async (req, res) => {
-    const { username, password } = req.body;
-
-    if (!username || !password)
-        return res.status(400).json({ error: "Missing username or password" });
-
-    try {
-        const result = await pool.query(
-            "SELECT * FROM victornavas.users WHERE username = $1",
-            [username]
-        );
-
-        if (result.rows.length === 0)
-            return res.status(401).json({ error: "Invalid credentials" });
-
-        const user = result.rows[0];
-
-        // Compare hashed password
-        const validPass = await bcrypt.compare(password, user.password_hash);
-        if (!validPass)
-            return res.status(401).json({ error: "Invalid credentials" });
-
-        // Generate JWT
-        const token = jwt.sign(
-            { user_id: user.id, username: user.username },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES || "7d" }
-        );
-
-        res.json({ success: true, token });
-    } catch (err) {
-        console.error("Login error:", err);
-        res.status(500).json({ error: "Server error" });
-    }
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 
-//// -------- START SERVER -------- ////
+// Test DB connection on startup
+(async () => {
+  try {
+    const result = await pool.query("SELECT current_database()");
+    console.log("✅ DB connected:", result.rows[0].current_database);
+  } catch (err) {
+    console.error("❌ DB connection failed:", err.message);
+  }
+})();
 
-app.listen(3001, () =>
-    console.log("Unified API running on port 3001")
-);
+// Make pool available to routes
+app.locals.db = pool;
+
+// -------------------- ROUTES --------------------
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    env: NODE_ENV,
+    time: new Date().toISOString()
+  });
+});
+
+app.use("/api/logs", logsRoutes);
+app.use("/api/auth", authRoutes);
+
+// -------------------- START SERVER --------------------
+app.listen(PORT, () => {
+  console.log(`🚀 Unified API running on port ${PORT} (${NODE_ENV})`);
+});
