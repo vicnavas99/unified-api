@@ -12,6 +12,7 @@ const { Pool } = require("pg");
 // Route files
 const logsRoutes = require("./routes/logs.routes");
 const authRoutes = require("./routes/auth.routes");
+const todoRoutes = require("./routes/todo.routes");
 
 // -------------------- APP SETUP --------------------
 const app = express();
@@ -50,6 +51,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+app.use("/api/todo", todoRoutes);
 app.use("/api/logs", logsRoutes);
 app.use("/api/auth", authRoutes);
 
