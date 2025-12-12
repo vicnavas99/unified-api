@@ -1,7 +1,7 @@
 const express = require("express");
 const pool = require("../db");
 const parseUA = require("../utils/userAgent");
-const validateApiKey = require("../middleware/apiKey.middleware");
+const validateApiKey = require("../middleware/apikey.middleware");
 
 const router = express.Router();
 
