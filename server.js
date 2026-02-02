@@ -75,17 +75,18 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"]
   })
 );
+// -------------------- RATE LIMIT (API ONLY) --------------------
+// ✅ Enable only in production so local dev never gets blocked
+if (IS_PROD) {
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300,                 // per IP
+    standardHeaders: true,
+    legacyHeaders: false
+  });
 
-// Rate limit: basic protection (API only)
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: IS_PROD ? 300 : 0,   // 0 disables limiter in dev
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-// Apply limiter to API routes (not static assets)
-app.use("/api", apiLimiter);
+  app.use("/api", apiLimiter);
+}
 
 // -------------------- DATABASE --------------------
 const pool = new Pool({
