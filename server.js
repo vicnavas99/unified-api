@@ -2,7 +2,7 @@
  * Unified API - server.js
  * Works in local + production automatically
  * - Adds basic security (helmet, rate limit)
- * - CORS hardened (configurable)
+ * - CORS hardened (configurable) + FIXED preflight OPTIONS in production
  * - Serves /public as static (optional, but safe)
  */
 
@@ -47,34 +47,40 @@ app.use(compression());
 // JSON body parsing (limit prevents huge payload abuse)
 app.use(express.json({ limit: "1mb" }));
 
-// CORS: allow-list for production, open for dev
+// -------------------- CORS (FIXED) --------------------
+// CORS allow-list (prod) + open (dev), but NEVER throw inside CORS callbacks
 const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
-  .map(s => s.trim())
+  .map((s) => s.trim())
   .filter(Boolean);
 
 // Example .env:
 // CORS_ORIGINS=https://wedding-jilaryvictor.com,https://www.wedding-jilaryvictor.com
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // allow same-origin / curl / server-to-server
-      if (!origin) return cb(null, true);
+const corsOptions = {
+  origin: (origin, cb) => {
+    // allow same-origin / curl / server-to-server
+    if (!origin) return cb(null, true);
 
-      // dev: allow everything
-      if (!IS_PROD) return cb(null, true);
+    // dev: allow everything
+    if (!IS_PROD) return cb(null, true);
 
-      // prod: require allow list (if set). If none set, allow nothing external.
-      if (allowedOrigins.length === 0) return cb(new Error("CORS blocked: no allowlist configured"));
+    // prod: if allowlist not set, don't crash preflight. (Recommended: set CORS_ORIGINS)
+    if (allowedOrigins.length === 0) return cb(null, true);
 
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS blocked: origin not allowed"));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
-  })
-);
+    // allow if in list; otherwise deny (DO NOT throw)
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
+
+app.use(cors(corsOptions));
+
+// ✅ Explicitly handle preflight for all routes (fixes browser OPTIONS 500)
+app.options("*", cors(corsOptions));
+
 // -------------------- RATE LIMIT (API ONLY) --------------------
 // ✅ Enable only in production so local dev never gets blocked
 if (IS_PROD) {
@@ -85,6 +91,7 @@ if (IS_PROD) {
     legacyHeaders: false
   });
 
+  // Apply limiter to API routes (not static assets)
   app.use("/api", apiLimiter);
 }
 
@@ -159,7 +166,7 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Unified API running on port ${PORT} (${NODE_ENV})`);
 });
 
-// Graceful shutdown (PM2 / docker / server restarts)
+// Graceful shutdown (systemd / docker / server restarts)
 async function shutdown(signal) {
   console.log(`\n🛑 ${signal} received. Shutting down...`);
   server.close(async () => {
