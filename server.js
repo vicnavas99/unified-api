@@ -1,8 +1,9 @@
 /**
- * Unified API - server.js (PRODUCTION-SAFE)
- * - Fixes CORS preflight OPTIONS (no more 500)
- * - Optional allowlist via CORS_ORIGINS
- * - Basic security: helmet + rate limit + compression
+ * Unified API - server.js (PRODUCTION SAFE)
+ * - Helmet + compression + json limit
+ * - Rate limit in prod
+ * - CORS fixed so browser OPTIONS preflight works
+ * - Routes: /api/*
  */
 
 require("dotenv").config();
@@ -39,27 +40,36 @@ app.use(
 app.use(compression());
 app.use(express.json({ limit: "1mb" }));
 
-// -------------------- CORS (FIXED) --------------------
-// IMPORTANT: DO NOT throw inside CORS origin callback.
-// Throwing causes OPTIONS preflight to become 500.
-
-const allowedOrigins = (process.env.CORS_ORIGINS || "")
+// -------------------- CORS (FIXED FOR BROWSER OPTIONS) --------------------
+// In production, we allow only known website origins.
+// If CORS_ORIGINS env is not set, we fall back to your wedding domains.
+const envAllow = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map(s => s.trim())
   .filter(Boolean);
 
-// If allowlist not set, default to allowing same-site usage safely
-// Since you proxy from nginx and frontend is same domain, this is fine.
-function isAllowedOrigin(origin) {
-  if (!origin) return true; // curl / server-to-server
-  if (allowedOrigins.length === 0) return true; // allow all if no allowlist configured
-  return allowedOrigins.includes(origin);
-}
+const defaultAllowProd = [
+  "https://wedding-jilaryvictor.com",
+  "https://www.wedding-jilaryvictor.com"
+];
+
+const allowList = IS_PROD
+  ? (envAllow.length ? envAllow : defaultAllowProd)
+  : ["*"];
 
 const corsOptions = {
   origin: (origin, cb) => {
-    // ✅ Never error: just allow/deny by returning true/false
-    cb(null, isAllowedOrigin(origin));
+    // Requests like curl / server-to-server / same-machine checks
+    if (!origin) return cb(null, true);
+
+    // Dev: allow everything
+    if (!IS_PROD) return cb(null, true);
+
+    // Prod: allow only allowList
+    if (allowList.includes(origin)) return cb(null, true);
+
+    // IMPORTANT: Do NOT throw (throwing causes OPTIONS to become 500)
+    return cb(null, false);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -67,13 +77,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// ✅ Ensure preflight ALWAYS returns 204 and never 500
+// Ensure preflight always responds cleanly
 app.options("*", cors(corsOptions));
-app.use("/api", (req, res, next) => {
-  if (req.method === "OPTIONS") return res.sendStatus(204);
-  next();
-});
 
 // -------------------- RATE LIMIT (API ONLY) --------------------
 if (IS_PROD) {
@@ -83,6 +88,7 @@ if (IS_PROD) {
     standardHeaders: true,
     legacyHeaders: false
   });
+
   app.use("/api", apiLimiter);
 }
 
@@ -107,7 +113,7 @@ app.locals.db = pool;
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
@@ -144,7 +150,6 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Unified API running on port ${PORT} (${NODE_ENV})`);
 });
 
-// Graceful shutdown
 async function shutdown(signal) {
   console.log(`\n🛑 ${signal} received. Shutting down...`);
   server.close(async () => {
