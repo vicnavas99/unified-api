@@ -1,9 +1,8 @@
 /**
- * Unified API - server.js
- * Works in local + production automatically
- * - Adds basic security (helmet, rate limit)
- * - CORS hardened (configurable) + FIXED preflight OPTIONS in production
- * - Serves /public as static (optional, but safe)
+ * Unified API - server.js (PRODUCTION-SAFE)
+ * - Fixes CORS preflight OPTIONS (no more 500)
+ * - Optional allowlist via CORS_ORIGINS
+ * - Basic security: helmet + rate limit + compression
  */
 
 require("dotenv").config();
@@ -28,48 +27,39 @@ const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
 
-// If behind nginx / reverse proxy (common in production)
 app.set("trust proxy", 1);
 
 // -------------------- SECURITY / MIDDLEWARE --------------------
-
-// Basic hardening headers
 app.use(
   helmet({
-    // If you end up embedding stuff later, you can loosen this.
     contentSecurityPolicy: false
   })
 );
 
-// gzip/deflate for responses
 app.use(compression());
-
-// JSON body parsing (limit prevents huge payload abuse)
 app.use(express.json({ limit: "1mb" }));
 
 // -------------------- CORS (FIXED) --------------------
-// CORS allow-list (prod) + open (dev), but NEVER throw inside CORS callbacks
+// IMPORTANT: DO NOT throw inside CORS origin callback.
+// Throwing causes OPTIONS preflight to become 500.
+
 const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
-  .map((s) => s.trim())
+  .map(s => s.trim())
   .filter(Boolean);
 
-// Example .env:
-// CORS_ORIGINS=https://wedding-jilaryvictor.com,https://www.wedding-jilaryvictor.com
+// If allowlist not set, default to allowing same-site usage safely
+// Since you proxy from nginx and frontend is same domain, this is fine.
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // curl / server-to-server
+  if (allowedOrigins.length === 0) return true; // allow all if no allowlist configured
+  return allowedOrigins.includes(origin);
+}
+
 const corsOptions = {
   origin: (origin, cb) => {
-    // allow same-origin / curl / server-to-server
-    if (!origin) return cb(null, true);
-
-    // dev: allow everything
-    if (!IS_PROD) return cb(null, true);
-
-    // prod: if allowlist not set, don't crash preflight. (Recommended: set CORS_ORIGINS)
-    if (allowedOrigins.length === 0) return cb(null, true);
-
-    // allow if in list; otherwise deny (DO NOT throw)
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(null, false);
+    // ✅ Never error: just allow/deny by returning true/false
+    cb(null, isAllowedOrigin(origin));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -78,31 +68,30 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// ✅ Explicitly handle preflight for all routes (fixes browser OPTIONS 500)
+// ✅ Ensure preflight ALWAYS returns 204 and never 500
 app.options("*", cors(corsOptions));
+app.use("/api", (req, res, next) => {
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 // -------------------- RATE LIMIT (API ONLY) --------------------
-// ✅ Enable only in production so local dev never gets blocked
 if (IS_PROD) {
   const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 300,                 // per IP
+    windowMs: 15 * 60 * 1000,
+    max: 300,
     standardHeaders: true,
     legacyHeaders: false
   });
-
-  // Apply limiter to API routes (not static assets)
   app.use("/api", apiLimiter);
 }
 
 // -------------------- DATABASE --------------------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Only require SSL in prod; local usually doesn't use SSL
   ssl: IS_PROD ? { rejectUnauthorized: false } : false
 });
 
-// Test DB connection on startup
 (async () => {
   try {
     const result = await pool.query("SELECT current_database()");
@@ -112,17 +101,12 @@ const pool = new Pool({
   }
 })();
 
-// Make pool available to routes
 app.locals.db = pool;
 
 // -------------------- STATIC FRONTEND (OPTIONAL) --------------------
-// If you put your wedding site in ./public, Express will serve it.
-// This does NOT break API-only setups.
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-// If you want index.html served automatically when hitting "/"
-// (only if you are hosting the frontend through this backend)
 app.get("/", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
@@ -146,16 +130,10 @@ app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-// Global error handler (prevents Express from sending stack traces in prod)
+// Global error handler
 app.use((err, _req, res, _next) => {
   const status = err.status || 500;
-
-  if (!IS_PROD) {
-    console.error("❌ Error:", err);
-  } else {
-    console.error("❌ Error:", err.message);
-  }
-
+  console.error("❌ Error:", IS_PROD ? err.message : err);
   res.status(status).json({
     error: status === 500 ? "Internal server error" : err.message
   });
@@ -166,7 +144,7 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Unified API running on port ${PORT} (${NODE_ENV})`);
 });
 
-// Graceful shutdown (systemd / docker / server restarts)
+// Graceful shutdown
 async function shutdown(signal) {
   console.log(`\n🛑 ${signal} received. Shutting down...`);
   server.close(async () => {
