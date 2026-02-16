@@ -22,9 +22,9 @@ router.post("/gate", async (req, res) => {
 
     // ✅ matches your real table columns
     const q = `
-      SELECT guest_list_id, group_id, first_name, last_name, classification, status, special_message
+      SELECT * --guest_list_id, group_id, first_name, last_name, classification, status, special_message, group_id_list
       FROM wedding.guest_list
-      WHERE LOWER(first_name) = LOWER($1)
+      WHERE (LOWER(first_name) = LOWER($1) OR LOWER(second_name) = LOWER($1))
         AND LOWER(last_name)  = LOWER($2)
       LIMIT 1
     `;
@@ -68,7 +68,7 @@ router.get("/group/:groupId", async (req, res) => {
     }
 
     const q = `
-      SELECT guest_list_id, group_id, first_name, last_name, classification, status, special_message
+      SELECT * --guest_list_id, group_id, first_name, last_name, classification, status, special_message
       FROM wedding.guest_list
       WHERE group_id = $1
       ORDER BY first_name, last_name
@@ -82,6 +82,40 @@ router.get("/group/:groupId", async (req, res) => {
     });
   } catch (err) {
     console.error("RSVP group error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno. Intenta más tarde.",
+      debug: process.env.NODE_ENV !== "production"
+        ? { message: err.message, code: err.code, detail: err.detail }
+        : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/rsvp/gate
+ * Body: { firstName, lastName }
+ * Checks if guest exists in wedding.guest_list
+ */
+router.get("/groupList/:groupIdList", async (req, res) => {
+  try {
+    const db = req.app.locals.db;
+    const groupId = req.params.groupIdList;
+
+    const q = `
+      SELECT *
+      FROM wedding.guest_list 
+      WHERE group_id IN (${groupId})
+      ORDER BY first_name, last_name`;
+
+    const result = await db.query(q);
+
+    return res.json({
+      ok: true,
+      group: result.rows
+    });
+  } catch (err) {
+    console.error("RSVP group list error:", err);
     return res.status(500).json({
       ok: false,
       message: "Error interno. Intenta más tarde.",
