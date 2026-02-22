@@ -22,7 +22,7 @@ router.post("/gate", async (req, res) => {
 
     // ✅ matches your real table columns
     const q = `
-      SELECT * --guest_list_id, group_id, first_name, last_name, classification, status, special_message, group_id_list
+      SELECT * 
       FROM wedding.guest_list
       WHERE (LOWER(first_name) = LOWER($1) OR LOWER(second_name) = LOWER($1))
         AND LOWER(last_name)  = LOWER($2)
@@ -68,7 +68,7 @@ router.get("/group/:groupId", async (req, res) => {
     }
 
     const q = `
-      SELECT * --guest_list_id, group_id, first_name, last_name, classification, status, special_message
+      SELECT * 
       FROM wedding.guest_list
       WHERE group_id = $1
       ORDER BY first_name, last_name
@@ -132,5 +132,72 @@ router.get("/groupList/:groupIdList", async (req, res) => {
 router.get("/ping", (_req, res) => {
   res.json({ ok: true, message: "rsvp routes working" });
 });
+
+/**
+ * POST /api/rsvp/updateUser
+ * Body: { guestListId, specialMessage, status, songRecomenation,usersWithStatusChange array of {guest_list_id, status} }
+ * Updates guests in wedding.guest_list
+ */
+router.post("/updateUser", async (req, res) => {
+  try {
+    const db = req.app.locals.db;
+
+    const guestListId = Number(req.body.guestListId);
+    const guestName = String(req.body.guestName || "").trim();
+    const hotel = Number(req.body.hotel || 0);
+    const specialMessage = String(req.body.specialMessage || "").trim();
+    const status = String(req.body.status || "").trim();
+    const songRecomenation = String(req.body.songRecomenation || "").trim();
+    const allergy = String(req.body.allergyComment || "").trim();
+    const usersWithStatusChange = req.body.usersWithStatusChange || [];
+    let going = "", notGoing = "", pending = "";
+
+    if (!guestListId || !status) {
+      return res.status(400).json({
+        ok: false,
+        message: "guestListId y status son requeridos."
+      });
+    }
+    
+    if(usersWithStatusChange.length > 0) {
+      for (const user of usersWithStatusChange) {
+        if (user.status === 1) going += user.guest_list_id + ",";
+        else if (user.status === 2) notGoing += user.guest_list_id + ",";
+        else if (user.status === 0) pending += user.guest_list_id + ",";
+      }
+      // Remove trailing commas
+      going = going.replace(/,$/, "");
+      notGoing = notGoing.replace(/,$/, "");
+      pending = pending.replace(/,$/, "");
+    }
+
+    // ✅ matches your real table columns
+    let q = `
+      UPDATE wedding.guest_list
+      SET status = ${status}, hotel = ${hotel}, special_message = '${specialMessage}', song_recommendation = '${songRecomenation}', allergy = '${allergy}', updatedby = '${guestName}'
+      WHERE guest_list_id = ${guestListId};
+    `;
+
+    if (going)  q += ` UPDATE wedding.guest_list SET status = 1 WHERE guest_list_id IN (${going});`;
+    if (notGoing) q += ` UPDATE wedding.guest_list SET status = 2 WHERE guest_list_id IN (${notGoing});`;
+    if (pending) q += ` UPDATE wedding.guest_list SET status = 0 WHERE guest_list_id IN (${pending});`;
+
+    const result = await db.query(q);
+
+    return res.json({
+      ok: true
+    });
+  } catch (err) {
+    console.error("RSVP gate error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno. Intenta más tarde.",
+      debug: process.env.NODE_ENV !== "production"
+        ? { message: err.message, code: err.code, detail: err.detail }
+        : undefined
+    });
+  }
+});
+
 
 module.exports = router;
