@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const XLSX = require("xlsx");
 
 /**
  * POST /api/rsvp/gate
@@ -199,5 +200,79 @@ router.post("/updateUser", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/admin/guests
+ * Returns all guests in wedding.guest_list
+ */
+router.get("/guests", async (req, res) => {
+  try {
+    const db = req.app.locals.db;
+
+    const q = `
+      SELECT *
+      FROM wedding.guest_list
+      ORDER BY group_id, last_name, first_name
+    `;
+
+    const result = await db.query(q);
+
+    res.json({ ok: true, guests: result.rows });
+  } catch (err) {
+    console.error("ADMIN guests error:", err);
+    res.status(500).json({ ok: false, message: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/admin/guests.xlsx
+ * Downloads the guest list as an .xlsx file
+ */
+router.get("/guests.xlsx", async (req, res) => {
+  try {
+    const db = req.app.locals.db;
+
+    const q = `
+      SELECT
+        guest_list_id,
+        group_id,
+        first_name,
+        last_name,
+        classification,
+        status,
+        special_message,
+        allergy,
+        song_recommendation,
+        hotel
+      FROM wedding.guest_list
+      ORDER BY group_id, last_name, first_name
+    `;
+
+    const result = await db.query(q);
+
+    // Convert rows -> worksheet
+    const ws = XLSX.utils.json_to_sheet(result.rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Guests");
+
+    // Write workbook to buffer
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="wedding-guests.xlsx"`
+    );
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    return res.send(buffer);
+  } catch (err) {
+    console.error("ADMIN xlsx error:", err);
+    res.status(500).json({ ok: false, message: "Internal server error" });
+  }
+});
+
+module.exports = router;
 
 module.exports = router;
