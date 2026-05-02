@@ -21,6 +21,7 @@ const logsRoutes = require("./routes/logs.routes");
 const authRoutes = require("./routes/auth.routes");
 const todoRoutes = require("./routes/todo.routes");
 const rsvpRoutes = require("./routes/rsvp.routes");
+const seatingRoutes = require("./routes/seating.routes");
 
 // -------------------- APP SETUP --------------------
 const app = express();
@@ -130,6 +131,7 @@ app.use("/api/todo", todoRoutes);
 app.use("/api/logs", logsRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/rsvp", rsvpRoutes);
+app.use("/api/seating", seatingRoutes);
 
 // 404 handler for API
 app.use("/api", (_req, res) => {
