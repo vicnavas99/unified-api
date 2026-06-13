@@ -58,10 +58,13 @@ router.get("/tables/:table_id", async (req, res) => {
         sa.guest_list_id,
         sa.seat_number,
         sa.notes,
-        gl.guest_name,
-        gl.email,
-        gl.phone,
-        gl.rsvp_status
+        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
+        gl.first_name,
+        gl.last_name,
+        gl.classification,
+        gl.status,
+        gl.special_message,
+        gl.allergy
       FROM wedding.seating_assignment sa
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
       WHERE sa.table_id = $1
@@ -159,7 +162,7 @@ router.put("/tables/:table_id", async (req, res) => {
   }
 });
 
-/* DELETE TABLE (HARD DELETE, CASCADES TO ASSIGNMENTS) */
+/* DELETE TABLE (HARD DELETE, REMOVES ASSIGNMENTS FIRST) */
 router.delete("/tables/:table_id", async (req, res) => {
   const { table_id } = req.params;
 
@@ -174,13 +177,19 @@ router.delete("/tables/:table_id", async (req, res) => {
       return res.status(404).json({ error: "Table not found" });
     }
 
-    // Delete table (cascades to assignments via FK)
+    // Remove any seating assignments for this table first
+    await pool.query(
+      `DELETE FROM wedding.seating_assignment WHERE table_id = $1`,
+      [table_id]
+    );
+
+    // Delete table
     await pool.query(
       `DELETE FROM wedding.seating_table WHERE table_id = $1`,
       [table_id]
     );
 
-    res.json({ ok: true, message: "Table deleted" });
+    res.json({ ok: true, message: "Table deleted and assignments removed" });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -201,10 +210,13 @@ router.get("/assignments", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        gl.guest_name,
-        gl.email,
-        gl.phone,
-        gl.rsvp_status
+        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
+        gl.first_name,
+        gl.last_name,
+        gl.classification,
+        gl.status,
+        gl.special_message,
+        gl.allergy
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
@@ -277,10 +289,13 @@ router.post("/assignments", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        gl.guest_name,
-        gl.email,
-        gl.phone,
-        gl.rsvp_status
+        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
+        gl.first_name,
+        gl.last_name,
+        gl.classification,
+        gl.status,
+        gl.special_message,
+        gl.allergy
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
@@ -353,10 +368,13 @@ router.put("/assignments/:seating_id", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        gl.guest_name,
-        gl.email,
-        gl.phone,
-        gl.rsvp_status
+        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
+        gl.first_name,
+        gl.last_name,
+        gl.classification,
+        gl.status,
+        gl.special_message,
+        gl.allergy
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
@@ -442,7 +460,7 @@ router.get("/reports/capacity", async (req, res) => {
         COUNT(sa.seating_id) AS occupancy,
         CASE 
           WHEN st.capacity = 0 THEN 0
-          ELSE ROUND((COUNT(sa.seating_id)::float / st.capacity::float) * 100, 2)
+          ELSE ROUND((COUNT(sa.seating_id)::numeric / st.capacity::numeric) * 100, 2)
         END AS fullness_percentage,
         CASE
           WHEN st.capacity = 0 THEN 'No capacity set'
@@ -467,16 +485,18 @@ router.get("/reports/unassigned", async (req, res) => {
     const result = await pool.query(`
       SELECT 
         gl.guest_list_id,
-        gl.guest_name,
-        gl.email,
-        gl.phone,
-        gl.rsvp_status,
-        gl.party_size
+        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
+        gl.first_name,
+        gl.last_name,
+        gl.classification,
+        gl.status,
+        gl.special_message,
+        gl.allergy
       FROM wedding.guest_list gl
       WHERE gl.guest_list_id NOT IN (
         SELECT DISTINCT guest_list_id FROM wedding.seating_assignment
       )
-      ORDER BY gl.guest_name
+      ORDER BY gl.first_name, gl.last_name
     `);
 
     res.json(result.rows);
@@ -506,10 +526,10 @@ router.get("/search", async (req, res) => {
 
     // Search guests
     const guestsResult = await pool.query(`
-      SELECT 'guest' AS type, guest_list_id AS id, guest_name AS name, null AS capacity, email
+      SELECT 'guest' AS type, guest_list_id AS id, CONCAT(first_name, ' ', last_name) AS name, null AS capacity, null AS email
       FROM wedding.guest_list
-      WHERE LOWER(guest_name) LIKE $1
-      ORDER BY guest_name
+      WHERE LOWER(CONCAT(first_name, ' ', last_name)) LIKE $1
+      ORDER BY first_name, last_name
     `, [searchTerm]);
 
     res.json({
