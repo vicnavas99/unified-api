@@ -4,6 +4,13 @@ const pool = require("../db");
 
 const router = express.Router();
 
+const buildGuestName = guest => {
+  if (!guest) return null;
+  if (guest.guest_name) return guest.guest_name;
+  const names = [guest.first_name, guest.last_name].filter(Boolean);
+  return names.length ? names.join(" ") : null;
+};
+
 /* 🔒 ALL SEATING ROUTES REQUIRE TOKEN - COMMENTED OUT FOR NOW */
 // router.use(requireAuth);
 
@@ -58,23 +65,22 @@ router.get("/tables/:table_id", async (req, res) => {
         sa.guest_list_id,
         sa.seat_number,
         sa.notes,
-        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
-        gl.first_name,
-        gl.last_name,
-        gl.classification,
-        gl.status,
-        gl.special_message,
-        gl.allergy
+        gl.*
       FROM wedding.seating_assignment sa
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
       WHERE sa.table_id = $1
       ORDER BY sa.seat_number, sa.seating_id
     `, [table_id]);
 
+    const assignments = assignmentsResult.rows.map(row => ({
+      ...row,
+      guest_name: buildGuestName(row)
+    }));
+
     res.json({
       table,
-      assignments: assignmentsResult.rows,
-      occupancy: assignmentsResult.rows.length
+      assignments,
+      occupancy: assignments.length
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -210,20 +216,19 @@ router.get("/assignments", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
-        gl.first_name,
-        gl.last_name,
-        gl.classification,
-        gl.status,
-        gl.special_message,
-        gl.allergy
+        gl.*
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
       ORDER BY st.table_name, sa.seat_number, sa.seating_id
     `);
 
-    res.json(result.rows);
+    const rows = result.rows.map(row => ({
+      ...row,
+      guest_name: buildGuestName(row)
+    }));
+
+    res.json(rows);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -289,23 +294,22 @@ router.post("/assignments", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
-        gl.first_name,
-        gl.last_name,
-        gl.classification,
-        gl.status,
-        gl.special_message,
-        gl.allergy
+        gl.*
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
       WHERE sa.seating_id = $1
     `, [result.rows[0].seating_id]);
 
+    const assignment = {
+      ...assignmentWithDetails.rows[0],
+      guest_name: buildGuestName(assignmentWithDetails.rows[0])
+    };
+
     res.status(201).json({
       ok: true,
       message: existingAssignment.rows.length > 0 ? "Guest reassigned to new table" : "Guest assigned to table",
-      assignment: assignmentWithDetails.rows[0]
+      assignment
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -368,20 +372,19 @@ router.put("/assignments/:seating_id", async (req, res) => {
         sa.seat_number,
         sa.notes,
         st.table_name,
-        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
-        gl.first_name,
-        gl.last_name,
-        gl.classification,
-        gl.status,
-        gl.special_message,
-        gl.allergy
+        gl.*
       FROM wedding.seating_assignment sa
       JOIN wedding.seating_table st ON sa.table_id = st.table_id
       LEFT JOIN wedding.guest_list gl ON sa.guest_list_id = gl.guest_list_id
       WHERE sa.seating_id = $1
     `, [seating_id]);
 
-    res.json(assignmentWithDetails.rows[0]);
+    const assignment = {
+      ...assignmentWithDetails.rows[0],
+      guest_name: buildGuestName(assignmentWithDetails.rows[0])
+    };
+
+    res.json(assignment);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -484,14 +487,7 @@ router.get("/reports/unassigned", async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        gl.guest_list_id,
-        CONCAT(gl.first_name, ' ', gl.last_name) AS guest_name,
-        gl.first_name,
-        gl.last_name,
-        gl.classification,
-        gl.status,
-        gl.special_message,
-        gl.allergy
+        gl.*
       FROM wedding.guest_list gl
       WHERE gl.guest_list_id NOT IN (
         SELECT DISTINCT guest_list_id FROM wedding.seating_assignment
@@ -499,7 +495,12 @@ router.get("/reports/unassigned", async (req, res) => {
       ORDER BY gl.first_name, gl.last_name
     `);
 
-    res.json(result.rows);
+    const rows = result.rows.map(row => ({
+      ...row,
+      guest_name: buildGuestName(row)
+    }));
+
+    res.json(rows);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
