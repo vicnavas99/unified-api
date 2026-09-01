@@ -23,6 +23,7 @@ const todoRoutes = require("./routes/todo.routes");
 const rsvpRoutes = require("./routes/rsvp.routes");
 const seatingRoutes = require("./routes/seating.routes");
 const plantsRoutes = require("./routes/plants.routes");
+const usersRoutes = require("./routes/users.routes");
 
 // -------------------- APP SETUP --------------------
 const app = express();
@@ -135,6 +136,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/rsvp", rsvpRoutes);
 app.use("/api/seating", seatingRoutes);
 app.use("/api/plants", plantsRoutes);
+app.use("/api/users", usersRoutes);
 
 // 404 handler for API
 app.use("/api", (_req, res) => {

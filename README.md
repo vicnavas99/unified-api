@@ -30,6 +30,9 @@ A centralized Express API for wedding RSVP, seating management, to-do lists, aut
 - `GET /api/plants` — list plant sensor data
 - `GET /api/plants/:sensor_id` — retrieve one plant sensor
 - `PUT /api/plants/:sensor_id` — create or update plant sensor data
+- `POST /api/users` — create a user; requires JWT
+- `PUT /api/users/:id` — update a user; requires JWT
+- `DELETE /api/users/:id` — delete a user; requires JWT
 
 ## Requirements
 
@@ -192,6 +195,25 @@ Response includes status, environment, and current time.
 The update body must include `plant_name`, `battery_level`, `humidity_number`,
 and `humidity_percentage`. The `sensor_id` is supplied in the URL and existing
 sensors are updated automatically.
+
+### User management routes
+
+All user management routes require `Authorization: Bearer <token>`.
+
+`POST /api/users` accepts:
+
+```json
+{
+  "username": "new-user",
+  "password": "password"
+}
+```
+
+`PUT /api/users/:id` accepts either or both of `username` and `password`.
+Passwords are stored as bcrypt hashes. Responses never include `password_hash`.
+
+`DELETE /api/users/:id` deletes the user and returns the deleted user's public
+fields.
 
 ## Database
 
