@@ -29,6 +29,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
+const USE_DB_SSL = IS_PROD || process.env.DB_SSL === "true";
 
 app.set("trust proxy", 1);
 
@@ -97,7 +98,7 @@ if (IS_PROD) {
 // -------------------- DATABASE --------------------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: IS_PROD ? { rejectUnauthorized: false } : false
+  ssl: USE_DB_SSL ? { rejectUnauthorized: false } : false
 });
 
 (async () => {

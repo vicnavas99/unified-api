@@ -1,10 +1,11 @@
 const { Pool } = require("pg");
 
 const isProd = process.env.NODE_ENV === "production";
+const useDbSsl = isProd || process.env.DB_SSL === "true";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isProd ? { rejectUnauthorized: false } : false
+  ssl: useDbSsl ? { rejectUnauthorized: false } : false
 });
 
 pool.query("SELECT current_database()")
