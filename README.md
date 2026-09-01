@@ -27,6 +27,9 @@ A centralized Express API for wedding RSVP, seating management, to-do lists, aut
 - `GET /api/health` — health check
 - `POST /api/logs/:site` — create site log entry
 - `GET /api/todo/*` — authenticated to-do list routes
+- `GET /api/plants` — list plant sensor data
+- `GET /api/plants/:sensor_id` — retrieve one plant sensor
+- `PUT /api/plants/:sensor_id` — create or update plant sensor data
 
 ## Requirements
 
@@ -180,6 +183,16 @@ Request body example:
 
 Response includes status, environment, and current time.
 
+### Plant routes
+
+- `GET /api/plants`
+- `GET /api/plants/:sensor_id`
+- `PUT /api/plants/:sensor_id`
+
+The update body must include `plant_name`, `battery_level`, `humidity_number`,
+and `humidity_percentage`. The `sensor_id` is supplied in the URL and existing
+sensors are updated automatically.
+
 ## Database
 
 The app expects a PostgreSQL database and a `DATABASE_URL` connection string. The server uses `pg` and attaches a pool to `app.locals.db`.
@@ -192,6 +205,7 @@ The routes reference these schemas/tables:
 - `wedding.seating_table`
 - `wedding.seating_assignment`
 - `appdata.logs`
+- `plants.plant_data`
 
 ## Deployment
 
