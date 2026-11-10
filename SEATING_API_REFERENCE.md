@@ -1,5 +1,80 @@
 # Seating Chart API Reference
 
+## Seating Layout
+
+The layout endpoints read and save shared positions for seating tables. Local requests use `http://127.0.0.1:3001`; production requests use the same-origin `/api` proxy. Both endpoints require a valid JWT in the `Authorization: Bearer <token>` header. The existing JWT middleware does not distinguish admin roles, so only issue/use these tokens for authorized admin accounts.
+
+Database setup instructions and SQL for real-table positions, the Main Table, and generic unassigned layout tables are in [`SEATING_LAYOUT_DATABASE_SETUP.md`](./SEATING_LAYOUT_DATABASE_SETUP.md). Generic tables are stored separately and are not guest seating or assignment records.
+
+### GET /api/seating/layout
+
+Returns all saved positions. Tables without a saved position are omitted.
+
+**Response (200):**
+```json
+{
+  "positions": [{ "table_id": 12, "x": 0.25, "y": 0.6 }],
+  "main_table_position": { "x": 0.5, "y": 0.5 }
+}
+```
+
+`positions` contains only real seating tables. `main_table_position` is `null` until a Main Table position is saved; otherwise it contains only `x` and `y`. With no saved Main Table position, the frontend starts it at the center (`x: 0.5`, `y: 0.5`). Coordinates are fractions across the canvas width and height, inclusive from `0` to `1`.
+
+When neither kind of position has been saved, the response is:
+```json
+{ "positions": [], "main_table_position": null }
+```
+
+### PUT /api/seating/layout/main-table
+
+Creates or updates the persistent position of the layout-only Main Table. This static route is independent from seating tables and assignments.
+
+**Request:**
+```http
+PUT /api/seating/layout/main-table
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{ "x": 0.5, "y": 0.5 }
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "main_table_position": { "x": 0.5, "y": 0.5 }
+}
+```
+
+Only finite JSON numbers in the inclusive range `[0, 1]` are accepted. Invalid values return `400`; missing or invalid JWTs return `401`.
+
+### PUT /api/seating/layout/:table_id
+
+Creates or updates the position for an existing table.
+
+**Request:**
+```http
+PUT /api/seating/layout/12
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{ "x": 0.25, "y": 0.6 }
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "position": { "table_id": 12, "x": 0.25, "y": 0.6 }
+}
+```
+
+The table ID must be a positive integer; `x` and `y` must be finite JSON numbers in the inclusive range `[0, 1]`. Invalid input returns `400`, an unknown table returns `404`, and database failures return a JSON error with a `500` status.
+
 ## Overview
 The Seating API manages wedding seating tables and guest-to-table assignments. All endpoints require JWT authentication via `Authorization: Bearer <token>` header.
 

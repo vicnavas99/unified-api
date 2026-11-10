@@ -1,6 +1,6 @@
 const express = require("express");
 const pool = require("../db");
-// const requireAuth = require("../middleware/auth.middleware");
+const requireAuth = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
@@ -11,8 +11,112 @@ const buildGuestName = guest => {
   return names.length ? names.join(" ") : null;
 };
 
-/* 🔒 ALL SEATING ROUTES REQUIRE TOKEN - COMMENTED OUT FOR NOW */
-// router.use(requireAuth);
+const isNormalizedCoordinate = value =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+
+router.get("/layout", requireAuth, async (_req, res) => {
+  try {
+    const [positionsResult, mainTableResult] = await Promise.all([
+      pool.query(`
+        SELECT table_id, x, y
+        FROM wedding.seating_layout_position
+        ORDER BY table_id
+      `),
+      pool.query(`
+        SELECT x, y
+        FROM wedding.seating_layout_main_table
+        WHERE singleton_id = TRUE
+      `)
+    ]);
+
+    const mainTable = mainTableResult.rows[0];
+
+    res.json({
+      positions: positionsResult.rows,
+      main_table_position: mainTable
+        ? { x: Number(mainTable.x), y: Number(mainTable.y) }
+        : null
+    });
+  } catch (err) {
+    console.error("Seating layout read failed:", err.message);
+    res.status(500).json({ error: "Failed to read seating layout" });
+  }
+});
+
+router.put("/layout/main-table", requireAuth, async (req, res) => {
+  const { x, y } = req.body ?? {};
+
+  if (!isNormalizedCoordinate(x) || !isNormalizedCoordinate(y)) {
+    return res.status(400).json({ error: "x and y must be finite numbers between 0 and 1" });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO wedding.seating_layout_main_table (singleton_id, x, y, updated_at)
+       VALUES (TRUE, $1, $2, NOW())
+       ON CONFLICT (singleton_id)
+       DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = NOW()
+       RETURNING x, y`,
+      [x, y]
+    );
+
+    const position = result.rows[0];
+    res.json({
+      success: true,
+      main_table_position: { x: Number(position.x), y: Number(position.y) }
+    });
+  } catch (err) {
+    console.error("Main Table position save failed:", err.message);
+    res.status(500).json({ error: "Failed to save Main Table position" });
+  }
+});
+
+router.put("/layout/:table_id", requireAuth, async (req, res) => {
+  const { table_id: tableIdParam } = req.params;
+  const { x, y } = req.body ?? {};
+
+  if (
+    !/^[1-9]\d*$/.test(tableIdParam) ||
+    !Number.isSafeInteger(Number(tableIdParam))
+  ) {
+    return res.status(400).json({ error: "table_id must be a positive integer" });
+  }
+
+  if (!isNormalizedCoordinate(x) || !isNormalizedCoordinate(y)) {
+    return res.status(400).json({ error: "x and y must be finite numbers between 0 and 1" });
+  }
+
+  const tableId = Number(tableIdParam);
+
+  try {
+    const tableResult = await pool.query(
+      "SELECT table_id FROM wedding.seating_table WHERE table_id = $1",
+      [tableId]
+    );
+
+    if (tableResult.rows.length === 0) {
+      return res.status(404).json({ error: "Table not found" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO wedding.seating_layout_position (table_id, x, y)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (table_id)
+       DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y
+       RETURNING table_id, x, y`,
+      [tableId, x, y]
+    );
+
+    res.json({ success: true, position: result.rows[0] });
+  } catch (err) {
+    if (err.code === "23503" || err.code === "22003") {
+      return res.status(404).json({ error: "Table not found" });
+    }
+
+    console.error("Seating layout save failed:", err.message);
+    res.status(500).json({ error: "Failed to save seating position" });
+  }
+});
 
 /* ============================================
    SEATING TABLES

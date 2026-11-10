@@ -12,6 +12,9 @@ A centralized Express API for wedding RSVP, seating management, to-do lists, aut
 - `GET /api/rsvp/guests` — list all guests
 - `GET /api/rsvp/guests.xlsx` — export guests to Excel
 - `GET /api/seating/tables` — list seating tables with occupancy
+- `GET /api/seating/layout` — list saved table positions; requires JWT
+- `PUT /api/seating/layout/:table_id` — save a table position; requires JWT
+- `PUT /api/seating/layout/main-table` — save the layout-only Main Table position; requires JWT
 - `GET /api/seating/tables/:table_id` — table details with assignments
 - `POST /api/seating/tables` — create seating table
 - `PUT /api/seating/tables/:table_id` — update table
